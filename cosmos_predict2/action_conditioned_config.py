@@ -56,6 +56,8 @@ class ActionConditionedInferenceArguments(CommonInferenceArguments):
     # Output parameters
     save_root: Path = Path("results/action2world")
     """Save root directory."""
+    overwrite: bool = False
+    """Overwrite existing outputs if True."""
     # Model parameters
     chunk_size: int = 12
     """Chunk size for action conditioning."""

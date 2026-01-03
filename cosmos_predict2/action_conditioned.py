@@ -254,10 +254,14 @@ def inference(
         # pyrefly: ignore  # bad-argument-type
         context_parallel_size=setup_args.context_parallel_size,
         config_file=setup_args.config_file,
+        offload_diffusion_model=setup_args.offload_diffusion_model,
+        offload_text_encoder=setup_args.offload_text_encoder,
+        offload_tokenizer=setup_args.offload_tokenizer,
     )
 
     mem_bytes = torch.cuda.memory_allocated(device=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
     logger.info(f"GPU memory usage after model load: {mem_bytes / (1024**3):.2f} GB")
+
 
     # Load action loading function
     action_load_fn = load_callable(inference_args.action_load_fn)
@@ -306,7 +310,8 @@ def inference(
         video_name = str(inference_args.save_root / f"{img_name.replace('.jpg', '.mp4')}")
         chunk_video_name = str(inference_args.save_root / f"{img_name}_chunk.mp4")
         logger.info(f"Saving video to {video_name}")
-        if os.path.exists(chunk_video_name):
+        # Skip regeneration unless overwrite is enabled.
+        if not inference_args.overwrite and os.path.exists(chunk_video_name):
             logger.info(f"Video already exists: {chunk_video_name}")
             continue
 
@@ -370,6 +375,7 @@ def inference(
         if rank0:
             mediapy.write_video(chunk_video_name, chunk_video, fps=inference_args.save_fps)
             logger.info(f"Saved video to {chunk_video_name}")
+
 
     # Synchronize all processes before cleanup
     # pyrefly: ignore  # unsupported-operation
