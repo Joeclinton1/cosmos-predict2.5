@@ -568,9 +568,9 @@ _register_checkpoint(
             uri="s3://bucket/cosmos_predict2_distill/predict2_distill/dmd2_trigflow_distill_cosmos_predict2_2B_bidirectional/checkpoints/iter_000007500/model",
         ),
         hf=CheckpointFileHf(
-            repository="nvidia/Cosmos-Experimental",
-            revision="cb56c64d7e5bb20a50b1e39b4429b967522e91d4",
-            filename="575edf0f-d973-4c74-b52c-69929a08d0a5/model_ema_bf16.pt",
+            repository="nvidia/Cosmos-Predict2.5-2B",
+            revision="main",
+            filename="base/distilled/575edf0f-d973-4c74-b52c-69929a08d0a5_ema_bf16.pt",
         ),
     ),
 )
