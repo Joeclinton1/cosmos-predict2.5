@@ -74,7 +74,7 @@ predict2_video2world_training_2b_groot_gr1_480 = dict(
     checkpoint=dict(
         save_iter=200,
         # pyrefly: ignore  # missing-attribute
-        load_path=get_checkpoint_path(DEFAULT_CHECKPOINT_2B.s3.uri),
+        load_path=DEFAULT_CHECKPOINT_2B.s3.uri,  # Lazy: don't download at import time
         load_from_object_store=dict(
             enabled=False,
         ),
@@ -148,7 +148,7 @@ predict2_video2world_training_14b_groot_gr1_480 = dict(
     checkpoint=dict(
         save_iter=200,
         # pyrefly: ignore  # missing-attribute
-        load_path=get_checkpoint_path(DEFAULT_CHECKPOINT_14B.s3.uri),
+        load_path=DEFAULT_CHECKPOINT_14B.s3.uri,  # Lazy: don't download at import time
         load_from_object_store=dict(
             enabled=False,
         ),

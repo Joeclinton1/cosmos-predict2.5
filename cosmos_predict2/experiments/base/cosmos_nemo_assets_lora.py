@@ -93,7 +93,7 @@ _lora_defaults = [
 
 _lora_checkpoint_base = dict(
     # pyrefly: ignore  # missing-attribute
-    load_path=get_checkpoint_path(DEFAULT_CHECKPOINT.s3.uri),
+    load_path=DEFAULT_CHECKPOINT.s3.uri,  # Lazy: don't download at import time
     load_from_object_store=dict(
         enabled=False,
     ),
