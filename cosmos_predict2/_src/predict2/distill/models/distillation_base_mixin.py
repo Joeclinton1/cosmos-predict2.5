@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import os
+
 import collections
 import random
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
@@ -148,6 +150,7 @@ class DistillationCoreMixin:
 
     # ------------------------ model building / checkpoint IO ------------------------
     def build_net(self, net_config_dict):
+        offload_dit = int(os.environ.get("COSMOS_PREDICT2_OFFLOAD_DIT", "0")) > 0
         init_device = "meta"
         with misc.timer("Creating PyTorch model"):
             with torch.device(init_device):
@@ -159,16 +162,23 @@ class DistillationCoreMixin:
                 net.fully_shard(mesh=self.fsdp_device_mesh)
                 net = fully_shard(net, mesh=self.fsdp_device_mesh, reshard_after_forward=True)
 
-            with misc.timer("meta to cuda and broadcast model states"):
-                net.to_empty(device="cuda")
-                # IMPORTANT: model init should not depend on current tensor shape, or it can handle DTensor shape.
-                net.init_weights()
+            if offload_dit:
+                with misc.timer("meta to cpu for deferred GPU materialization"):
+                    net.to_empty(device="cpu")
+                    net.init_weights()
+            else:
+                with misc.timer("meta to cuda and broadcast model states"):
+                    net.to_empty(device="cuda")
+                    # IMPORTANT: model init should not depend on current tensor shape, or it can handle DTensor shape.
+                    net.init_weights()
 
             if self.fsdp_device_mesh:
                 # recall model weight init; be careful for buffers!
                 broadcast_dtensor_model_states(net, self.fsdp_device_mesh)
                 for name, param in net.named_parameters():
                     assert isinstance(param, DTensor), f"param should be DTensor, {name} got {type(param)}"
+        if offload_dit:
+            net.cpu()
         return net
 
     @misc.timer("DistillationCoreMixin: set_up_model")
