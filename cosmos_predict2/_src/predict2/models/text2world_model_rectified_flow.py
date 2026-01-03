@@ -198,6 +198,8 @@ class Text2WorldModelRectifiedFlow(ImaginaireModel):
 
     def build_net(self, keep_on_cpu: bool = False):
         config = self.config
+        offload_dit = int(os.environ.get("COSMOS_PREDICT2_OFFLOAD_DIT", "0")) > 0
+        keep_on_cpu = keep_on_cpu or offload_dit
 
         init_device = "meta"
         with misc.timer("Creating PyTorch model"):
@@ -246,7 +248,7 @@ class Text2WorldModelRectifiedFlow(ImaginaireModel):
                     broadcast_dtensor_model_states(net, self.fsdp_device_mesh)
                     for name, param in net.named_parameters():
                         assert isinstance(param, DTensor), f"param should be DTensor, {name} got {type(param)}"
-        if int(os.environ.get("COSMOS_PREDICT2_OFFLOAD_DIT", "0")) > 0:
+        if offload_dit:
             net.cpu()
         return net
 
@@ -331,13 +333,19 @@ class Text2WorldModelRectifiedFlow(ImaginaireModel):
             self.net_ema_worker.update_average(self.net, self.net_ema, beta=ema_beta)
 
     def on_train_start(self, memory_format: torch.memory_format = torch.preserve_format) -> None:
+        offload_dit = int(os.environ.get("COSMOS_PREDICT2_OFFLOAD_DIT", "0")) > 0
         if self.config.ema.enabled:
             self.net_ema.to(dtype=torch.float32)
         if hasattr(self.tokenizer, "reset_dtype"):
             self.tokenizer.reset_dtype()
-        self.net = self.net.to(memory_format=memory_format, **self.tensor_kwargs)
+        if not offload_dit:
+            self.net = self.net.to(memory_format=memory_format, **self.tensor_kwargs)
 
-        if hasattr(self.config, "use_torch_compile") and self.config.use_torch_compile:  # compatible with old config
+        if (
+            not offload_dit
+            and hasattr(self.config, "use_torch_compile")
+            and self.config.use_torch_compile
+        ):  # compatible with old config
             if torch.__version__ < "2.3":
                 log.warning(
                     "torch.compile in Pytorch version older than 2.3 doesn't work well with activation checkpointing.\n"

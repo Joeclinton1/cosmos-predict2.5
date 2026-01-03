@@ -208,6 +208,7 @@ class DiffusionModel(ImaginaireModel):
 
     def build_net(self):
         config = self.config
+        offload_dit = int(os.environ.get("COSMOS_PREDICT2_OFFLOAD_DIT", "0")) > 0
 
         init_device = "meta"
         with misc.timer("Creating PyTorch model"):
@@ -228,16 +229,21 @@ class DiffusionModel(ImaginaireModel):
                 net.fully_shard(mesh=self.fsdp_device_mesh)
                 net = fully_shard(net, mesh=self.fsdp_device_mesh, reshard_after_forward=True)
 
-            with misc.timer("meta to cuda and broadcast model states"):
-                net.to_empty(device="cuda")
-                # IMPORTANT: (qsh) model init should not depends on current tensor shape, or it can handle Dtensor shape.
-                net.init_weights()
+            if offload_dit:
+                with misc.timer("meta to cpu for deferred GPU materialization"):
+                    net.to_empty(device="cpu")
+                    net.init_weights()
+            else:
+                with misc.timer("meta to cuda and broadcast model states"):
+                    net.to_empty(device="cuda")
+                    # IMPORTANT: (qsh) model init should not depends on current tensor shape, or it can handle Dtensor shape.
+                    net.init_weights()
 
             if self.fsdp_device_mesh:
                 broadcast_dtensor_model_states(net, self.fsdp_device_mesh)
                 for name, param in net.named_parameters():
                     assert isinstance(param, DTensor), f"param should be DTensor, {name} got {type(param)}"
-        if int(os.environ.get("COSMOS_PREDICT2_OFFLOAD_DIT", "0")) > 0:
+        if offload_dit:
             net.cpu()
         return net
 
@@ -311,13 +317,19 @@ class DiffusionModel(ImaginaireModel):
             self.net_ema_worker.update_average(self.net, self.net_ema, beta=ema_beta)
 
     def on_train_start(self, memory_format: torch.memory_format = torch.preserve_format) -> None:
+        offload_dit = int(os.environ.get("COSMOS_PREDICT2_OFFLOAD_DIT", "0")) > 0
         if self.config.ema.enabled:
             self.net_ema.to(dtype=torch.float32)
         if hasattr(self.tokenizer, "reset_dtype"):
             self.tokenizer.reset_dtype()
-        self.net = self.net.to(memory_format=memory_format, **self.tensor_kwargs)
+        if not offload_dit:
+            self.net = self.net.to(memory_format=memory_format, **self.tensor_kwargs)
 
-        if hasattr(self.config, "use_torch_compile") and self.config.use_torch_compile:  # compatible with old config
+        if (
+            not offload_dit
+            and hasattr(self.config, "use_torch_compile")
+            and self.config.use_torch_compile
+        ):  # compatible with old config
             if torch.__version__ < "2.3":
                 log.warning(
                     "torch.compile in Pytorch version older than 2.3 doesn't work well with activation checkpointing.\n"

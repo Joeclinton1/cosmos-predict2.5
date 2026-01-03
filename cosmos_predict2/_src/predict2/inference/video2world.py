@@ -555,7 +555,10 @@ class Video2WorldInference:
         # Load the main diffusion network to GPU for sampling
         if self.offload_diffusion_model:
             log.info("[Memory Optimization] Loading diffusion network to GPU")
-            self.model.net = self.model.net.to("cuda")
+            if hasattr(self.model, "tensor_kwargs"):
+                self.model.net = self.model.net.to(memory_format=torch.preserve_format, **self.model.tensor_kwargs)
+            else:
+                self.model.net = self.model.net.to("cuda")
             # Also load conditioner if it exists
             if hasattr(self.model, "conditioner") and self.model.conditioner is not None:
                 self.model.conditioner = self.model.conditioner.to("cuda")
