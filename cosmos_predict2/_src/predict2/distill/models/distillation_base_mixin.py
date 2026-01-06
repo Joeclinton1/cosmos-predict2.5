@@ -193,57 +193,66 @@ class DistillationCoreMixin:
                 "conditioner should not have learnable parameters"
             )
 
-            assert config.teacher_load_from.load_path, (
-                "A pretrained teacher model checkpoint is required for distillation"
-            )
+            student_only = os.environ.get("COSMOS_PREDICT2_DISTILL_STUDENT_ONLY", "0") == "1"
+            if student_only:
+                log.info("Distillation student-only mode enabled; skipping teacher/fake-score/discriminator nets.")
+                self.net = self.build_net(config.net)
+                # Keep attribute for any code paths that expect it without duplicating weights.
+                self.net_teacher = self.net
+                self.net_fake_score = None
+                self.net_discriminator_head = None
+            else:
+                assert config.teacher_load_from.load_path, (
+                    "A pretrained teacher model checkpoint is required for distillation"
+                )
 
-            self.net_teacher = self.build_net(config.net_teacher)
-            if self.config.init_student_with_teacher:
-                log.info("==========Loading teacher checkpoint to TEACHER net==========")
-                self.load_ckpt_to_net(self.net_teacher, config.teacher_load_from.load_path)
-
-            self.net = self.build_net(config.net)
-            if self.config.init_student_with_teacher:
-                log.info("==========Loading teacher net weights to STUDENT net==========")
-                # strict copy teacher -> student while ignoring *_extra_state; keep target for non-matching keys
-                to_load = {k: v for k, v in self.net_teacher.state_dict().items() if not k.endswith("_extra_state")}
-                res = self.net.load_state_dict(to_load, strict=False)
-                missing = [k for k in res.missing_keys if not k.endswith("_extra_state")]
-                unexpected = [k for k in res.unexpected_keys if not k.endswith("_extra_state")]
-                if missing or unexpected:
-                    log.warning(f"!!!!!!!!!!!!!!!!!Missing: {missing[:10]}, Unexpected: {unexpected}")
-                if not missing and not unexpected:
-                    log.info("==========teacher -> student: All keys matched successfully.")
-
-            # fake score net for approximating score func of the student generator output
-            if config.net_fake_score:
-                # init fake score net with the teacher score func (teacher model)
-                self.net_fake_score = self.build_net(config.net_fake_score)
+                self.net_teacher = self.build_net(config.net_teacher)
                 if self.config.init_student_with_teacher:
-                    log.info("==========Loading teacher net weights to FAKE SCORE net==========")
+                    log.info("==========Loading teacher checkpoint to TEACHER net==========")
+                    self.load_ckpt_to_net(self.net_teacher, config.teacher_load_from.load_path)
+
+                self.net = self.build_net(config.net)
+                if self.config.init_student_with_teacher:
+                    log.info("==========Loading teacher net weights to STUDENT net==========")
+                    # strict copy teacher -> student while ignoring *_extra_state; keep target for non-matching keys
                     to_load = {k: v for k, v in self.net_teacher.state_dict().items() if not k.endswith("_extra_state")}
-                    res = self.net_fake_score.load_state_dict(to_load, strict=False)
+                    res = self.net.load_state_dict(to_load, strict=False)
                     missing = [k for k in res.missing_keys if not k.endswith("_extra_state")]
                     unexpected = [k for k in res.unexpected_keys if not k.endswith("_extra_state")]
                     if missing or unexpected:
                         log.warning(f"!!!!!!!!!!!!!!!!!Missing: {missing[:10]}, Unexpected: {unexpected}")
                     if not missing and not unexpected:
-                        log.info("==========teacher -> fake score: All keys matched successfully.")
-                assert self.loss_scale_sid > 0 or self.loss_scale_GAN_generator > 0
-            else:
-                self.net_fake_score = None
+                        log.info("==========teacher -> student: All keys matched successfully.")
 
-            # discriminator
-            if config.net_discriminator_head:
-                self.net_discriminator_head = self.build_net(config.net_discriminator_head)
+                # fake score net for approximating score func of the student generator output
+                if config.net_fake_score:
+                    # init fake score net with the teacher score func (teacher model)
+                    self.net_fake_score = self.build_net(config.net_fake_score)
+                    if self.config.init_student_with_teacher:
+                        log.info("==========Loading teacher net weights to FAKE SCORE net==========")
+                        to_load = {k: v for k, v in self.net_teacher.state_dict().items() if not k.endswith("_extra_state")}
+                        res = self.net_fake_score.load_state_dict(to_load, strict=False)
+                        missing = [k for k in res.missing_keys if not k.endswith("_extra_state")]
+                        unexpected = [k for k in res.unexpected_keys if not k.endswith("_extra_state")]
+                        if missing or unexpected:
+                            log.warning(f"!!!!!!!!!!!!!!!!!Missing: {missing[:10]}, Unexpected: {unexpected}")
+                        if not missing and not unexpected:
+                            log.info("==========teacher -> fake score: All keys matched successfully.")
+                    assert self.loss_scale_sid > 0 or self.loss_scale_GAN_generator > 0
+                else:
+                    self.net_fake_score = None
 
-                # assert self.loss_scale_GAN_generator > 0
-                assert config.net_fake_score
-                # assert self.net_discriminator_head.model_channels == self.net_fake_score.model_channels
-                assert config.intermediate_feature_ids
-                assert self.net_discriminator_head.num_branches == len(config.intermediate_feature_ids)
-            else:
-                self.net_discriminator_head = None
+                # discriminator
+                if config.net_discriminator_head:
+                    self.net_discriminator_head = self.build_net(config.net_discriminator_head)
+
+                    # assert self.loss_scale_GAN_generator > 0
+                    assert config.net_fake_score
+                    # assert self.net_discriminator_head.model_channels == self.net_fake_score.model_channels
+                    assert config.intermediate_feature_ids
+                    assert self.net_discriminator_head.num_branches == len(config.intermediate_feature_ids)
+                else:
+                    self.net_discriminator_head = None
 
             # freeze models
             if self.net.use_crossattn_projection and self.disable_proj_grad:
@@ -254,8 +263,9 @@ class DistillationCoreMixin:
                 log.info("Freezing the CR1 embedding projection layer in fake score net..")
                 self.net_fake_score.crossattn_proj.requires_grad_(False)
 
-            log.info("Freezing teacher net..")
-            self.net_teacher.requires_grad_(False)
+            if self.net_teacher is not self.net:
+                log.info("Freezing teacher net..")
+                self.net_teacher.requires_grad_(False)
 
             self._param_count = count_params(self.net, verbose=False)
 

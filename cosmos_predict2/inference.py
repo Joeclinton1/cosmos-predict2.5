@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +32,9 @@ class Inference:
         log.debug(f"{args.__class__.__name__}({args})")
 
         torch.enable_grad(False)  # Disable gradient calculations for inference
+
+        if os.environ.get("COSMOS_DISABLE_GUARDRAILS", "0") == "1":
+            args.disable_guardrails = True
 
         self.rank0 = distributed.is_rank0()
         self.setup_args = args
