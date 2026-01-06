@@ -272,9 +272,10 @@ class Video2WorldInference:
         self.offload_diffusion_model = offload_diffusion_model
         self.offload_text_encoder = offload_text_encoder
         self.offload_tokenizer = offload_tokenizer
+        self.defer_dit_gpu_load = os.environ.get("COSMOS_DEFER_DIT_GPU_LOAD", "0") == "1"
 
         # If no offloading is specified, instruct model loader to move the model to GPU
-        model_device = None if offload_diffusion_model else "cuda"
+        model_device = None if (offload_diffusion_model or self.defer_dit_gpu_load) else "cuda"
 
         # Initialize distributed processing if context parallel size > 1
         if self.context_parallel_size > 1:
@@ -288,7 +289,7 @@ class Video2WorldInference:
 
         # LazyConfig interference is not available yet
         # Use envvar to control whether DiT should be offloaded immediately after ctor
-        if self.offload_diffusion_model:
+        if self.offload_diffusion_model or self.defer_dit_gpu_load:
             os.environ["COSMOS_PREDICT2_OFFLOAD_DIT"] = "1"
 
         model, config = load_model_from_checkpoint(
@@ -299,28 +300,34 @@ class Video2WorldInference:
             experiment_opts=experiment_opts,
             to_device=model_device,
         )
-
         # By default, everything will be constructed directly on the GPU (except DiT)
         # Handle offloading options at inference entry
 
         # [On-entry offloading part 1]: DiT was offloaded as default by the lazy ctor
         # Offload or reload according to setup
-        if self.offload_diffusion_model:
-            log.info("[Memory Optimization] Offloading DiT conditioner to CPU")
+        if self.defer_dit_gpu_load:
+            log.info("[Memory Optimization] Deferring DiT to CPU")
+            model.net = model.net.to("cpu")
             if hasattr(model, "conditioner") and model.conditioner is not None:
                 model.conditioner = model.conditioner.to("cpu")
-        else:
-            # Move everything to the GPU (marginal overhead)
-            model.net.to("cuda")
-
-        # [On-entry offloading part 2]: Tokenizer
-        if self.offload_tokenizer:
-            log.info("[Memory Optimization] Offloading tokenizer encoder & decoder to CPU")
-            if hasattr(model.tokenizer, "encoder") and model.tokenizer.encoder is not None:
-                model.tokenizer.encoder = model.tokenizer.encoder.to("cpu")
-            if hasattr(model.tokenizer, "decoder") and model.tokenizer.decoder is not None:
-                model.tokenizer.decoder = model.tokenizer.decoder.to("cpu")
             torch.cuda.empty_cache()
+        else:
+            if self.offload_diffusion_model:
+                log.info("[Memory Optimization] Offloading DiT conditioner to CPU")
+                if hasattr(model, "conditioner") and model.conditioner is not None:
+                    model.conditioner = model.conditioner.to("cpu")
+            else:
+                # Move everything to the GPU (marginal overhead)
+                model.net.to("cuda")
+
+            # [On-entry offloading part 2]: Tokenizer
+            if self.offload_tokenizer:
+                log.info("[Memory Optimization] Offloading tokenizer encoder & decoder to CPU")
+                if hasattr(model.tokenizer, "encoder") and model.tokenizer.encoder is not None:
+                    model.tokenizer.encoder = model.tokenizer.encoder.to("cpu")
+                if hasattr(model.tokenizer, "decoder") and model.tokenizer.decoder is not None:
+                    model.tokenizer.decoder = model.tokenizer.decoder.to("cpu")
+                torch.cuda.empty_cache()
 
         # [On-entry offloading part 3]: Text encoder
         if self.offload_text_encoder:
@@ -541,6 +548,16 @@ class Video2WorldInference:
             # TextEncoder is a wrapper class with self.model (the actual neural network)
             if hasattr(self.model.text_encoder, "model") and self.model.text_encoder.model is not None:
                 self.model.text_encoder.model = self.model.text_encoder.model.to("cpu")
+            torch.cuda.empty_cache()
+
+        if self.defer_dit_gpu_load and not self.offload_diffusion_model:
+            log.info("[Memory Optimization] Loading diffusion network to GPU")
+            if hasattr(self.model, "tensor_kwargs"):
+                self.model.net = self.model.net.to(memory_format=torch.preserve_format, **self.model.tensor_kwargs)
+            else:
+                self.model.net = self.model.net.to("cuda")
+            if hasattr(self.model, "conditioner") and self.model.conditioner is not None:
+                self.model.conditioner = self.model.conditioner.to("cuda")
             torch.cuda.empty_cache()
 
         # Memory Optimization Step 2: Tokenizer Encoder

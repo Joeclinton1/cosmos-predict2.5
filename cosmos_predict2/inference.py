@@ -33,8 +33,7 @@ class Inference:
 
         torch.enable_grad(False)  # Disable gradient calculations for inference
 
-        if os.environ.get("COSMOS_DISABLE_GUARDRAILS", "0") == "1":
-            args.disable_guardrails = True
+        args.disable_guardrails = True
 
         self.rank0 = distributed.is_rank0()
         self.setup_args = args

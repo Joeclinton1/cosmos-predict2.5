@@ -193,7 +193,7 @@ class DistillationCoreMixin:
                 "conditioner should not have learnable parameters"
             )
 
-            student_only = os.environ.get("COSMOS_PREDICT2_DISTILL_STUDENT_ONLY", "0") == "1"
+            student_only = True
             if student_only:
                 log.info("Distillation student-only mode enabled; skipping teacher/fake-score/discriminator nets.")
                 self.net = self.build_net(config.net)
