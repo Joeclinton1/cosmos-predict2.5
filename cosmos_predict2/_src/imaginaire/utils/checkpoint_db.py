@@ -569,7 +569,7 @@ _register_checkpoint(
         ),
         hf=CheckpointFileHf(
             repository="nvidia/Cosmos-Predict2.5-2B",
-            revision="main",
+            revision="e26f8a125a2235c5a00245a65207402dd0cdcb89",
             filename="base/distilled/575edf0f-d973-4c74-b52c-69929a08d0a5_ema_bf16.pt",
         ),
     ),
