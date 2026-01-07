@@ -64,7 +64,26 @@ from cosmos_predict2._src.imaginaire.flags import INTERNAL
 from cosmos_predict2._src.imaginaire.utils import distributed, log
 from cosmos_predict2._src.imaginaire.utils.easy_io import easy_io
 from cosmos_predict2._src.predict2.inference.get_t5_emb import get_text_embedding
-from cosmos_predict2._src.predict2.utils.model_loader import load_model_from_checkpoint
+def load_model_from_checkpoint(*args, **kwargs):
+    """Auto-detect which loader to use based on config_file."""
+    config_file = kwargs.get('config_file', '')
+    if 'distill' in config_file:
+        from cosmos_predict2._src.imaginaire.utils import log
+        from cosmos_predict2._src.predict2.distill.utils.model_loader import (
+            load_model_from_checkpoint as _load,
+        )
+        log.info(f"✓ Using DISTILL loader with config_file: {config_file}")
+        # Distill loader doesn't support these kwargs (but does support to_device now)
+        kwargs.pop('skip_load_model', None)
+        kwargs.pop('adapter_checkpoint_paths', None)
+        kwargs.pop('cache_text_encoder', None)
+    else:
+        from cosmos_predict2._src.imaginaire.utils import log
+        from cosmos_predict2._src.predict2.utils.model_loader import (
+            load_model_from_checkpoint as _load,
+        )
+        log.info(f"Using BASE loader with config_file: {config_file}")
+    return _load(*args, **kwargs)
 
 _IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"]
 _VIDEO_EXTENSIONS = [".mp4"]

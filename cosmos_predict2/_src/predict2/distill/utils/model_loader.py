@@ -42,6 +42,7 @@ def load_model_from_checkpoint(
     override_cache: bool = False,
     experiment_opts: list[str] = [],
     skip_teacher_init: bool = True,
+    to_device: str | None = "cuda",
 ):
     """
     experiment_name: experiment name
@@ -58,6 +59,9 @@ def load_model_from_checkpoint(
     config_module = get_config_module(config_file)
     config = importlib.import_module(config_module).make_config()
     config = override(config, ["--", f"experiment={experiment_name}"] + experiment_opts)
+
+    log.info(f"✓ Distill loader: experiment_name={experiment_name}")
+    log.info(f"✓ Distill loader: checkpoint={s3_checkpoint_dir}")
 
     if load_ema_to_reg:
         config.model.config.ema.enabled = False
@@ -111,7 +115,10 @@ def load_model_from_checkpoint(
         # disable fsdp
         config.model.config.fsdp_shard_size = 1
     with misc.timer("instantiate model"):
-        model = instantiate(config.model).cuda()
+        model = instantiate(config.model)
+        log.info(f"✓ Distill loader: instantiated model class={model.__class__.__name__}")
+        if to_device is not None:
+            model = model.to(torch.device(to_device))
         # Convert the model parameters to bf16
         model.on_train_start()
 
