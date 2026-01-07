@@ -445,10 +445,12 @@ def non_strict_load_model(model: torch.nn.Module, checkpoint_state_dict: dict) -
     # workaround https://github.com/pytorch/pytorch/issues/24139
     model_state_dict = model.state_dict()
     incorrect_shapes = []
+    suppress_fp8_extra_state = os.environ.get("COSMOS_SUPPRESS_FP8_EXTRA_STATE_WARNINGS", "0") == "1"
     for k in list(checkpoint_state_dict.keys()):
         if k in model_state_dict:
             if "_extra_state" in k:  # Key introduced by TransformerEngine for FP8
-                log.warning(f"Skipping key {k} introduced by TransformerEngine for FP8 in the checkpoint.")
+                if not suppress_fp8_extra_state:
+                    log.warning(f"Skipping key {k} introduced by TransformerEngine for FP8 in the checkpoint.")
                 continue
             model_param = model_state_dict[k]
             # Allow mismatch for uninitialized parameters

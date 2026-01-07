@@ -23,6 +23,7 @@ from loguru._logger import Core, Logger
 
 RANK0_ONLY = True
 LEVEL = os.environ.get("LOGURU_LEVEL", "INFO")
+SUPPRESS_PATTERNS = [p.strip() for p in os.environ.get("COSMOS_SUPPRESS_LOG_PATTERNS", "").split(",") if p.strip()]
 
 
 def make_new_logger(depth: int = 1) -> Logger:
@@ -62,7 +63,7 @@ def init_loguru_stdout() -> None:
         sys.stdout,
         level=LEVEL,
         format=f"{datetime_format}{machine_format}{message_format}",
-        filter=_rank0_only_filter,
+        filter=lambda record: _rank0_only_filter(record) and _suppress_message_filter(record),
     )
 
 
@@ -76,7 +77,7 @@ def init_loguru_file(path: str) -> None:
         level=LEVEL,
         format=f"{datetime_format}{machine_format}{message_format}",
         rotation="100 MB",
-        filter=lambda result: _rank0_only_filter(result) or not RANK0_ONLY,
+        filter=lambda record: (_rank0_only_filter(record) or not RANK0_ONLY) and _suppress_message_filter(record),
         enqueue=True,
     )
 
@@ -112,6 +113,16 @@ def _rank0_only_filter(record: Any) -> bool:
     if not is_rank0:
         record["message"] = f"[RANK {_get_rank()}] " + record["message"]
     return not is_rank0
+
+
+def _suppress_message_filter(record: Any) -> bool:
+    if not SUPPRESS_PATTERNS:
+        return True
+    message = record.get("message", "")
+    for pattern in SUPPRESS_PATTERNS:
+        if pattern and pattern in message:
+            return False
+    return True
 
 
 def trace(message: str, rank0_only: bool = True) -> None:
